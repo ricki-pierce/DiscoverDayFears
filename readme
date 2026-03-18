@@ -1,0 +1,30 @@
+Open the laptop
+
+Connect buttons to laptop
+Open Arduino ide
+the DiscoverDay.ino code should automatically pop up
+click the checkmark
+click the arrow to the right
+if there are any problems go to tools and make sure the board selected says arduino mega or mega 2560
+also take note of which port it is connected to (COM4)....
+can close it out. 
+
+open visual studio code. 
+DiscoverDay.py should automatically pop up....
+make sure the right com is listed as the serial port (line 17)
+
+connect the glasses to the samsung phone
+open the phone
+turn on the mobile hot spot
+go back to the laptop and connect to the phone's hotspot
+now on the phone, open the neon companion app
+check the ip address and make sure it matches what is typed into line 56 in the python code
+
+when ready, click the play button in top right corner of teh python code
+it may take a minute or two but you shoul dsee that Arduino is connected and that the phone is connected
+when you click start, the beep will play, a button will light up, and neon glasses begin recording.
+the beeps and buttons will cycle through and teh recording is continued.
+when you click stop, recording is stopped. when you exit, saved to an excel fiel which is saved in eth downloads folder
+if you open file explorer and go to dowbloads, it will be teh first thing there
+
+when finished, dont forget to disconnect teh hotspot so you dont waste data. 
