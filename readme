@@ -1,38 +1,65 @@
-Open the laptop
+Equipment Setup & Operation Protocol
+    1. Laptop & Arduino Setup
+          Open the laptop.
+          Connect the buttons to the laptop.
+          Open Arduino IDE.
+          The file DiscoverDay.ino should open automatically.
+          Click the checkmark (✓) to verify the code.
+          Click the arrow (→) to upload the code.
+          
+          If there are errors:
+          Go to Tools → Board and ensure “Arduino Mega or Mega 2560” is selected.
+          Check Tools → Port and note which COM port is being used (e.g., COM4).
+          Close Arduino IDE when finished.
 
-Connect buttons to laptop
-Open Arduino ide
-the DiscoverDay.ino code should automatically pop up
-click the checkmark
-click the arrow to the right
-if there are any problems go to tools and make sure the board selected says arduino mega or mega 2560
-also take note of which port it is connected to (COM4)....
-can close it out. 
+    2. Python Program Setup
+          Open Visual Studio Code.
+          The file DiscoverDay.py should open automatically.
+          Confirm the correct COM port is listed on line 17 (must match Arduino).
 
-open visual studio code. 
-DiscoverDay.py should automatically pop up....
-make sure the right com is listed as the serial port (line 17)
+    3. Phone & Glasses Setup
+          Connect the glasses to the Samsung phone.
+          Unlock the phone.
+          Turn on the mobile hotspot.
+          On the laptop, connect to the phone’s hotspot.
 
-connect the glasses to the samsung phone
-open the phone
-turn on the mobile hot spot
-go back to the laptop and connect to the phone's hotspot
-now on the phone, open the neon companion app
-check the ip address and make sure it matches what is typed into line 56 in the python code
+    4. Neon Companion App Setup
+          On the phone, open the Neon Companion app.
+          Find the IP address in the app.
+          Ensure this IP address matches the one listed on line 56 in the Python code.
+    
+    5. Running the Experiment
+          In Visual Studio Code, click the Play (▶) button (top right).
+          Wait 1–2 minutes for connections:
+          Arduino should connect
+          Phone should connect
+          Click Start:
+              A beep will play
+              A button will light up
+              Neon glasses begin recording
+              The system will:
+                    Cycle through beeps and buttons
+                    Continue recording automatically
+          Click Stop to end recording.
+          
+    6. Saving Data
+          After exiting, data is saved as an Excel file in the Downloads folder.
+          To find it:
+          Open File Explorer → Downloads
+          The file should be the most recent item
+    
+    7. Uploading to Pupil Cloud
+          Ensure the phone is connected to eduroam Wi-Fi.
+          In the Neon Companion app, tap the cloud icon to upload the recording.
+    
+    8. Viewing Data
+          On the laptop, open Pupil Cloud (bookmarked in browser).
+          Select the uploaded recording.
+          You should see:
+                  A red circle indicating gaze fixation
+                  A video of the participant’s eyes in the top-right corner
+    
+    9. Shutdown & Cleanup
+          Turn off the phone’s mobile hotspot to save data.
+          Disconnect all devices.
 
-when ready, click the play button in top right corner of teh python code
-it may take a minute or two but you shoul dsee that Arduino is connected and that the phone is connected
-when you click start, the beep will play, a button will light up, and neon glasses begin recording.
-the beeps and buttons will cycle through and teh recording is continued.
-when you click stop, recording is stopped. when you exit, saved to an excel fiel which is saved in eth downloads folder
-if you open file explorer and go to dowbloads, it will be teh first thing there
-
-when finished, dont forget to disconnect teh hotspot so you dont waste data. 
-
-also make sure the phone is on eduroam 
-you may need to sign in with your information
-and upload (click the little cloud) next to the pupil lab video you just recorded
-
-go to the laptop and click on pupil cloud (its favorited in teh bookmarks bar)
-you can click on the video you just recorded and you should see a small red circle which is the gaze fixation.
-in teh top right corner, you shoudl see a video of the participants eyes.
