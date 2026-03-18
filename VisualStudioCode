@@ -1,0 +1,429 @@
+"""
+Trial Controller — Neon + Arduino Seesaw Buttons + Beep + Excel Logger
+No QTM. No GUI. Runs entirely from the terminal.
+
+Flow:
+  1. Enter Subject ID and task names.
+  2. For each trial: press Enter to start → Neon records, beep plays, random LED lights.
+  3. Press Enter again to stop → Neon stops/saves, LED turns off.
+  4. Type 'done' when finished → exports Excel log.
+"""
+
+import asyncio
+import threading
+import serial
+import time
+import random
+import sounddevice as sd
+import soundfile as sf
+import os
+import subprocess
+import pytz
+from datetime import datetime
+from openpyxl import Workbook
+from pupil_labs.realtime_api.simple import discover_one_device
+
+# ─────────────────────────── CONFIG ───────────────────────────
+SERIAL_PORT   = 'COM6'
+BAUD_RATE     = 115200
+WORK_DIR      = r"C:\Users\AoMV Lab\ricki projects"
+BEEP_FILE     = r"C:\Users\AoMV Lab\ricki projects\500Hz500mstone.wav"
+CENTRAL_TZ    = pytz.timezone('America/Chicago')
+
+os.chdir(WORK_DIR)
+
+# ─────────────────────────── HELPERS ──────────────────────────
+def now_central():
+    return datetime.now(CENTRAL_TZ)
+
+def ts():
+    """Short timestamp string for logging."""
+    return now_central().strftime('%H:%M:%S.%f')[:-3]
+
+def sync_windows_time():
+    try:
+        out = subprocess.check_output(
+            ['w32tm', '/resync'], shell=True, stderr=subprocess.STDOUT, text=True
+        )
+        print(f"[TIME SYNC] {out.strip()}")
+    except subprocess.CalledProcessError as e:
+        print(f"[TIME SYNC FAILED] {e.output.strip()}")
+
+# ─────────────────────────── GLOBALS ──────────────────────────
+event_log      = []   # list of tuples written to Excel at the end
+press_times    = {}   # button → arduino_ms at press
+current_button = None # which button is currently lit
+
+# ─────────────────────────── ARDUINO ──────────────────────────
+try:
+    arduino = serial.Serial(port=SERIAL_PORT, baudrate=BAUD_RATE, timeout=1)
+    time.sleep(2)
+    print(f"[ARDUINO] Connected on {SERIAL_PORT}")
+except serial.SerialException as e:
+    print(f"[ARDUINO] Could not open {SERIAL_PORT}: {e}")
+    arduino = None
+
+def read_serial(selected_task_ref, task_trial_counts, subject_id):
+    """Background thread: reads button press/release events from Arduino."""
+    global current_button
+    while True:
+        if arduino and arduino.in_waiting > 0:
+            line = arduino.readline().decode(errors='ignore').strip()
+            if not line:
+                continue
+            parts = line.split()
+            if len(parts) != 2:
+                continue
+
+            event, arduino_ms_str = parts[0], parts[1]
+            try:
+                arduino_ms = int(arduino_ms_str)
+            except ValueError:
+                continue
+
+            system_time = ts()
+            task = selected_task_ref[0]
+            if task is None:
+                continue
+
+            task_name     = task['name']
+            uses_arduino  = task['uses_arduino']
+            trial_number  = task_trial_counts.get(task_name, 0)
+
+            if "_pressed" in event:
+                button = event.split("_")[1]
+                press_times[button] = arduino_ms
+                event_log.append((
+                    trial_number, task_name, current_button,
+                    system_time, f"#{button} - pressed",
+                    None, uses_arduino, None, subject_id
+                ))
+                print(f"  [BTN] Button {current_button} pressed")
+
+                # Turn off the lit LED when any button is pressed
+                if current_button is not None and arduino:
+                    arduino.write(f"LED_{current_button}_OFF\n".encode())
+
+            elif "_released" in event:
+                button = event.split("_")[1]
+                if button in press_times:
+                    duration = arduino_ms - press_times[button]
+                    event_log.append((
+                        trial_number, task_name, current_button,
+                        system_time, f"#{button} - released",
+                        duration, uses_arduino, None, subject_id
+                    ))
+                    print(f"  [BTN] Button {current_button} released ({duration} ms)")
+                    del press_times[button]
+
+# ─────────────────────────── NEON ─────────────────────────────
+def connect_neon(timeout=10):
+    print(f"[NEON] Searching for device (up to {timeout}s)…")
+    device = discover_one_device(max_search_duration_seconds=timeout)
+    if device:
+        print("[NEON] Device connected.")
+    else:
+        print("[NEON] No device found — continuing without eye tracking.")
+    return device
+
+def neon_start(device, trial_number, task_name, uses_arduino, subject_id):
+    if not device:
+        return
+    try:
+        event_log.append((
+            trial_number, task_name, None, ts(),
+            "Neon Start Command Sent", None, uses_arduino, None, subject_id
+        ))
+        device.recording_start()
+        event_log.append((
+            trial_number, task_name, None, ts(),
+            "Neon Recording Started", None, uses_arduino, None, subject_id
+        ))
+        print("[NEON] Recording started.")
+    except Exception as e:
+        print(f"[NEON] Start failed: {e}")
+
+def neon_stop(device, trial_number, task_name, uses_arduino, subject_id):
+    if not device:
+        return
+    try:
+        event_log.append((
+            trial_number, task_name, None, ts(),
+            "Neon Stop Command Sent", None, uses_arduino, None, subject_id
+        ))
+        device.recording_stop_and_save()
+        event_log.append((
+            trial_number, task_name, None, ts(),
+            "Neon Recording Stopped", None, uses_arduino, None, subject_id
+        ))
+        print("[NEON] Recording stopped and saved.")
+    except Exception as e:
+        print(f"[NEON] Stop failed: {e}")
+
+# ─────────────────────────── BEEP ─────────────────────────────
+def play_beep(trial_number, task_name, uses_arduino, subject_id):
+    event_log.append((
+        trial_number, task_name, None, ts(),
+        "Beep Started", None, uses_arduino, None, subject_id
+    ))
+    print("[BEEP] Playing…")
+    data, fs = sf.read(BEEP_FILE, dtype='float32')
+    sd.play(data, fs)
+    sd.wait()
+    print("[BEEP] Done.")
+
+# ─────────────────────────── LED ──────────────────────────────
+def light_random_button(button_pool, trial_number, task_name, uses_arduino, subject_id):
+    global current_button
+    if not button_pool:
+        print("[LED] All buttons have been used this trial.")
+        return
+    current_button = random.choice(button_pool)
+    button_pool.remove(current_button)
+
+    if arduino:
+        arduino.write(f"LED_{current_button}_ON\n".encode())
+        arduino.flush()
+
+    event_log.append((
+        trial_number, task_name, current_button, ts(),
+        f"LED_{current_button}_Lit", None, uses_arduino, None, subject_id
+    ))
+    print(f"[LED] Button {current_button} lit.")
+
+def turn_off_current_led():
+    global current_button
+    if current_button is not None and arduino:
+        arduino.write(f"LED_{current_button}_OFF\n".encode())
+        arduino.flush()
+        print(f"[LED] Button {current_button} off.")
+    current_button = None
+
+# ─────────────────────────── EXCEL ────────────────────────────
+def export_to_excel(subject_id):
+    if not event_log:
+        print("[EXCEL] No events to export.")
+        return
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Trials"
+
+    headers = [
+        'Subject ID', 'Task Name', 'Trial', 'Timestamp',
+        'Event', 'Hand Used', 'Uses Arduino', 'Button Lit', 'Duration (ms)'
+    ]
+    for col, h in enumerate(headers, 1):
+        ws.cell(row=1, column=col, value=h)
+
+    for row_idx, entry in enumerate(event_log, start=2):
+        trial, task_name, button, timestamp, event, duration, uses_arduino, hand_used, sid = entry
+        ws.cell(row=row_idx, column=1, value=sid)
+        ws.cell(row=row_idx, column=2, value=task_name)
+        ws.cell(row=row_idx, column=3, value=trial)
+        ws.cell(row=row_idx, column=4, value=timestamp)
+        ws.cell(row=row_idx, column=5, value=event)
+        ws.cell(row=row_idx, column=6, value=hand_used)
+        ws.cell(row=row_idx, column=7, value="Yes" if uses_arduino else "No")
+        ws.cell(row=row_idx, column=8, value=button)
+        ws.cell(row=row_idx, column=9, value=duration)
+
+    filename = f"trial_log_{now_central().strftime('%Y%m%d_%H%M%S')}_{subject_id}.xlsx"
+    wb.save(filename)
+    print(f"[EXCEL] Saved → {filename}")
+
+# ─────────────────────────── SETUP ────────────────────────────
+def setup_tasks():
+    tasks = {}           # name → {'name', 'uses_arduino'}
+    trial_counts = {}    # name → int
+    arduino_claimed = False
+
+    try:
+        num = int(input("How many tasks? "))
+    except ValueError:
+        num = 1
+
+    for i in range(1, num + 1):
+        name = input(f"  Task {i} name: ").strip() or f"Task{i}"
+        uses_arduino = False
+        if not arduino_claimed:
+            ans = input(f"  Does '{name}' use Arduino buttons? (y/n): ").strip().lower()
+            if ans == 'y':
+                uses_arduino = True
+                arduino_claimed = True
+        tasks[name] = {'name': name, 'uses_arduino': uses_arduino}
+        trial_counts[name] = 0
+
+    return tasks, trial_counts
+
+# ─────────────────────────── MAIN ─────────────────────────────
+def main():
+    sync_windows_time()
+
+    # Subject ID
+    subject_id = input("Enter Subject ID: ").strip() or "Unknown"
+
+    # Task setup
+    tasks, task_trial_counts = setup_tasks()
+    task_list = list(tasks.keys())
+
+    # Arduino button count
+    num_buttons = 0
+    if any(t['uses_arduino'] for t in tasks.values()):
+        try:
+            num_buttons = int(input("How many Seesaw buttons? (1-4): "))
+        except ValueError:
+            num_buttons = 1
+        num_buttons = max(1, min(4, num_buttons))
+
+    # Neon
+    neon_device = connect_neon()
+
+    # Shared mutable reference so the serial thread can see the current task
+    selected_task_ref = [None]
+
+    # Start serial reader thread
+    serial_thread = threading.Thread(
+        target=read_serial,
+        args=(selected_task_ref, task_trial_counts, subject_id),
+        daemon=True
+    )
+    serial_thread.start()
+
+    print("\n─────────────────────────────────────────────")
+    print("Commands during session:")
+    print("  Enter   → start next trial for selected task")
+    print("  s       → stop current trial")
+    print("  t <num> → switch task (e.g. 't 2' for task 2)")
+    print("  done    → end session and export Excel")
+    print("─────────────────────────────────────────────\n")
+
+    # Default to first task
+    current_task = tasks[task_list[0]]
+    selected_task_ref[0] = current_task
+    print(f"Active task: [{current_task['name']}]")
+
+    trial_running = False
+    button_pool   = []
+
+    while True:
+        try:
+            cmd = input("\n> ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            break
+
+        # ── Switch task ──
+        if cmd.startswith('t '):
+            try:
+                idx = int(cmd.split()[1]) - 1
+                if 0 <= idx < len(task_list):
+                    current_task = tasks[task_list[idx]]
+                    selected_task_ref[0] = current_task
+                    print(f"Switched to task: [{current_task['name']}]")
+                else:
+                    print(f"Invalid task number. Choose 1–{len(task_list)}.")
+            except (ValueError, IndexError):
+                print("Usage: t <number>")
+
+        # ── Done ──
+        elif cmd == 'done':
+            if trial_running:
+                print("Stopping current trial first…")
+                turn_off_current_led()
+                neon_stop(
+                    neon_device,
+                    task_trial_counts[current_task['name']],
+                    current_task['name'],
+                    current_task['uses_arduino'],
+                    subject_id
+                )
+                trial_running = False
+            break
+
+        # ── Stop ──
+        elif cmd == 's':
+            if not trial_running:
+                print("No trial is running.")
+                continue
+
+            turn_off_current_led()
+
+            event_log.append((
+                task_trial_counts[current_task['name']],
+                current_task['name'], None, ts(),
+                "Trial Stopped", None,
+                current_task['uses_arduino'], None, subject_id
+            ))
+
+            neon_stop(
+                neon_device,
+                task_trial_counts[current_task['name']],
+                current_task['name'],
+                current_task['uses_arduino'],
+                subject_id
+            )
+            trial_running = False
+            print("Trial stopped.")
+
+        # ── Start (Enter) ──
+        elif cmd == '':
+            if trial_running:
+                print("A trial is already running. Press 's' to stop it first.")
+                continue
+
+            task_trial_counts[current_task['name']] += 1
+            trial_number = task_trial_counts[current_task['name']]
+            task_name    = current_task['name']
+            uses_arduino = current_task['uses_arduino']
+
+            print(f"\n=== {task_name} — Trial {trial_number} ===")
+
+            # Reset button pool for this trial
+            button_pool = list(range(1, num_buttons + 1))
+
+            # Log trial start
+            event_log.append((
+                trial_number, task_name, None, ts(),
+                "Trial Started", None, uses_arduino, None, subject_id
+            ))
+
+            # Start Neon
+            neon_thread = threading.Thread(
+                target=neon_start,
+                args=(neon_device, trial_number, task_name, uses_arduino, subject_id),
+                daemon=True
+            )
+            neon_thread.start()
+            neon_thread.join()   # wait for Neon to actually start before beep
+
+            # Short pause then beep + LED simultaneously
+            time.sleep(1.5)
+
+            def beep_and_led():
+                # Beep in its own thread so LED fires at the same time
+                beep_t = threading.Thread(
+                    target=play_beep,
+                    args=(trial_number, task_name, uses_arduino, subject_id),
+                    daemon=True
+                )
+                beep_t.start()
+
+                if uses_arduino:
+                    light_random_button(
+                        button_pool, trial_number, task_name, uses_arduino, subject_id
+                    )
+
+                beep_t.join()
+
+            threading.Thread(target=beep_and_led, daemon=True).start()
+            trial_running = True
+
+        else:
+            print("Unknown command. Enter=start, s=stop, t <n>=switch task, done=export & quit.")
+
+    export_to_excel(subject_id)
+    print("\nSession complete. Goodbye.")
+
+
+if __name__ == "__main__":
+    main()
