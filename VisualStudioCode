@@ -2,7 +2,6 @@
 #hot spot. Use the phone/Neon's IP address. make sure the laptop is also connected to the phone's hotspot. 
 #you shouldn't have to do anything else. 
 
-
 import tkinter as tk
 from tkinter import messagebox
 import threading
