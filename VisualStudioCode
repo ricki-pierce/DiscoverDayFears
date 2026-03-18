@@ -1,3 +1,8 @@
+#If you are running this on the small silver Dell laptop, you need to make sure you turn on the Neon phone's
+#hot spot. Use the phone/Neon's IP address. make sure the laptop is also connected to the phone's hotspot. 
+#you shouldn't have to do anything else. 
+
+
 import tkinter as tk
 from tkinter import messagebox
 import threading
@@ -49,8 +54,13 @@ except serial.SerialException as e:
 
 # ───────── NEON FUNCTIONS ─────────
 def discover_neon(timeout=10):
-    print(f"[NEON] Searching for device (up to {timeout}s)…")
-    device = discover_one_device(max_search_duration_seconds=timeout)
+    from pupil_labs.realtime_api.simple import Device
+
+    # Replace with the actual IP address of your phone
+    # Port 8080 is the default for Neon
+    device = Device(address="167.96.71.118", port=8080)
+
+    print(f"Connected to {device.phone_name}")
     if device:
         print("[NEON] Device connected.")
     else:
